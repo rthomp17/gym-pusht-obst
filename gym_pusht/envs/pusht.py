@@ -201,6 +201,11 @@ class PushTEnv(gym.Env):
                         high=np.array([512, 512]),
                         dtype=np.float64,
                     ),
+                    "obstacle_pos": spaces.List(spaces.Box(
+                        low=np.array([0, 0]),
+                        high=np.array([512, 512]),
+                        dtype=np.float64,
+                    ),)
                 },
             )
         elif self.obs_type == "pixels":
@@ -284,6 +289,20 @@ class PushTEnv(gym.Env):
                 ],
                 # dtype=np.float64
             )
+            while True:
+                x = rs.randint(100, 400)
+                y = rs.randint(100, 400)
+                if (np.linalg.norm(np.array([x,y]) - state[:2]) <= 45): 
+                    continue
+                elif (np.linalg.norm(np.array([x,y]) - state[2:4]) <= 50): 
+                    continue
+                elif (np.linalg.norm(np.array([x,y]) - np.array([256, 256])) <= 50): 
+                    continue
+                else:
+                    state=np.concatenate([state, np.array([x,y])])
+                    break
+
+
         self._set_state(state)
 
         observation = self.get_obs()
@@ -446,22 +465,37 @@ class PushTEnv(gym.Env):
         # Add agent, block, and goal zone
         self.agent = self.add_circle(self.space, (256, 400), 15)
         self.block, self._block_shapes = self.add_tee(self.space, (256, 300), 0)
+
+
+        #TODO: Generate obstacles at eval time 
+        #TODO: Make it so the generated obstacles don't overlap with the goal or any existing objects
+
+        
+        self.obstacle_poses = [(100, 100)]
+        self.obstacles = []
+        for i in range(len(self.obstacle_poses)):
+            self.obstacles.append(self.add_obstacle(self.space, self.obstacle_poses[i], 30))
+
+
         self.goal_pose = np.array([256, 256, np.pi / 4])  # x, y, theta (in radians)
         if self.block_cog is not None:
             self.block.center_of_gravity = self.block_cog
 
         # Add collision handling
-        self.collision_handeler = self.space.add_collision_handler(0, 0)
-        self.collision_handeler.post_solve = self._handle_collision
+        # self.collision_handeler = self.space.add_collision_handler(0, 0)
+        # self.collision_handeler.post_solve = self._handle_collision
         self.n_contact_points = 0
 
     def _set_state(self, state):
         self.agent.position = list(state[:2])
+
         # Setting angle rotates with respect to center of mass, therefore will modify the geometric position if not
         # the same as CoM. Therefore should theoretically set the angle first. But for compatibility with legacy data,
         # we do the opposite.
         self.block.position = list(state[2:4])
         self.block.angle = state[4]
+        self.space.remove(self.obstacles[0][0], self.obstacles[0][1])
+        self.obstacles = [self.add_obstacle(self.space, list(state[-2:]), 30)]
 
         # Run physics to take effect
         self.space.step(self.dt)
@@ -482,6 +516,16 @@ class PushTEnv(gym.Env):
         shape.color = pygame.Color("RoyalBlue")
         space.add(body, shape)
         return body
+    
+    @staticmethod
+    def add_obstacle(space, position, radius):
+        body = pymunk.Body(body_type=pymunk.Body.STATIC)
+        body.position = position
+        body.friction = 1
+        shape = pymunk.Circle(body, radius)
+        shape.color = pygame.Color("Red")
+        space.add(body, shape)
+        return body, shape
 
     @staticmethod
     def add_tee(space, position, angle, scale=30, color="LightSlateGray", mask=None):
